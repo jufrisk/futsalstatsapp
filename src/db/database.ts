@@ -8,6 +8,22 @@ import type {
   Team,
 } from "@/domain/types";
 
+export type SyncTableName =
+  | "seasons"
+  | "teams"
+  | "players"
+  | "matches"
+  | "matchPlayers"
+  | "matchEvents";
+
+/** A record deleted locally, kept so the deletion can propagate during sync. */
+export interface Tombstone {
+  id: string; // `${table}:${recordId}`
+  table: SyncTableName;
+  recordId: string;
+  deletedAt: string;
+}
+
 export class FutsalStatsDatabase extends Dexie {
   seasons!: Table<Season, string>;
   teams!: Table<Team, string>;
@@ -15,6 +31,7 @@ export class FutsalStatsDatabase extends Dexie {
   matches!: Table<Match, string>;
   matchPlayers!: Table<MatchPlayer, string>;
   matchEvents!: Table<MatchEvent, string>;
+  tombstones!: Table<Tombstone, string>;
 
   constructor(name = "FutsalStats") {
     super(name);
@@ -25,6 +42,10 @@ export class FutsalStatsDatabase extends Dexie {
       matches: "id,seasonId,teamId,date,status",
       matchPlayers: "id,matchId,playerId",
       matchEvents: "id,matchId,sequence,type,period",
+    });
+    // v2 adds a tombstone table for multi-device sync (existing data is kept).
+    this.version(2).stores({
+      tombstones: "id,table,deletedAt",
     });
   }
 }
@@ -40,8 +61,30 @@ export const ALL_TABLES = [
   db.matchEvents,
 ];
 
+export const SYNC_TABLE_NAMES: SyncTableName[] = [
+  "seasons",
+  "teams",
+  "players",
+  "matches",
+  "matchPlayers",
+  "matchEvents",
+];
+
+export async function recordTombstone(
+  table: SyncTableName,
+  recordId: string,
+  deletedAt = new Date().toISOString(),
+): Promise<void> {
+  await db.tombstones.put({ id: `${table}:${recordId}`, table, recordId, deletedAt });
+}
+
+export async function clearTombstones(table: SyncTableName, recordIds: string[]): Promise<void> {
+  if (recordIds.length === 0) return;
+  await db.tombstones.bulkDelete(recordIds.map((rid) => `${table}:${rid}`));
+}
+
 export async function clearAllData(): Promise<void> {
-  await db.transaction("rw", ALL_TABLES, async () => {
-    await Promise.all(ALL_TABLES.map((t) => t.clear()));
+  await db.transaction("rw", [...ALL_TABLES, db.tombstones], async () => {
+    await Promise.all([...ALL_TABLES.map((t) => t.clear()), db.tombstones.clear()]);
   });
 }

@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { ToastProvider } from "./toast";
+import { AdminAuthProvider } from "./adminAuth";
 import { useBootstrap } from "./hooks";
 import { AppLayout } from "./AppLayout";
 import { Spinner } from "@/components/ui";
@@ -18,6 +19,7 @@ export default function App() {
 
   return (
     <ToastProvider>
+      <AdminAuthProvider>
       {!ready ? (
         <Spinner label="Alustetaan sovellusta…" />
       ) : (
@@ -38,6 +40,7 @@ export default function App() {
           </Route>
         </Routes>
       )}
+      </AdminAuthProvider>
     </ToastProvider>
   );
 }

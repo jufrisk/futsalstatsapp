@@ -1,4 +1,10 @@
-import { db, clearAllData, ALL_TABLES } from "@/db/database";
+import {
+  db,
+  clearAllData,
+  ALL_TABLES,
+  SYNC_TABLE_NAMES,
+  type SyncTableName,
+} from "@/db/database";
 import { appBackupSchema, matchExportSchema } from "@/domain/schemas";
 import type { AppBackup, MatchExport } from "@/domain/types";
 import { nowIso } from "@/domain/ids";
@@ -47,9 +53,19 @@ export interface ImportResult {
   counts: Record<string, number>;
 }
 
+const BACKUP_TABLE_KEYS: Record<SyncTableName, keyof AppBackup> = {
+  seasons: "seasons",
+  teams: "teams",
+  players: "players",
+  matches: "matches",
+  matchPlayers: "matchPlayers",
+  matchEvents: "matchEvents",
+};
+
 /**
- * TECHNICAL_SPEC §41 – parse, Zod-validate, schemaVersion check, conflict
- * handling, single IndexedDB transaction, then the UI refreshes via liveQuery.
+ * TECHNICAL_SPEC §41 – parse, Zod-validate, schemaVersion check, then a single
+ * IndexedDB transaction. On "replace", every record the backup no longer
+ * contains gets a tombstone so the deletion propagates to other devices.
  */
 export async function restoreBackup(raw: unknown, mode: ImportMode): Promise<ImportResult> {
   const parsed = appBackupSchema.safeParse(raw);
@@ -63,27 +79,32 @@ export async function restoreBackup(raw: unknown, mode: ImportMode): Promise<Imp
     throw new Error(`Tuntematon schemaVersion: ${backup.schemaVersion}`);
   }
 
+  const removedTombstones =
+    mode === "replace" ? await collectRemovedTombstones(backup) : [];
+
   if (mode === "replace") {
     await clearAllData();
   }
 
-  await db.transaction("rw", ALL_TABLES, async () => {
-      await db.seasons.bulkPut(backup.seasons);
-      await db.teams.bulkPut(backup.teams);
-      await db.players.bulkPut(backup.players);
-      await db.matches.bulkPut(backup.matches);
-      await db.matchPlayers.bulkPut(backup.matchPlayers);
-      await db.matchEvents.bulkPut(backup.matchEvents);
+  await db.transaction("rw", [...ALL_TABLES, db.tombstones], async () => {
+    await db.seasons.bulkPut(backup.seasons);
+    await db.teams.bulkPut(backup.teams);
+    await db.players.bulkPut(backup.players);
+    await db.matches.bulkPut(backup.matches);
+    await db.matchPlayers.bulkPut(backup.matchPlayers);
+    await db.matchEvents.bulkPut(backup.matchEvents);
 
-      if (mode === "merge") {
-        const activeCount = (await db.seasons.toArray()).filter((s) => s.active).length;
-        if (activeCount !== 1) {
-          const all = await db.seasons.toArray();
-          await Promise.all(
-            all.map((s, i) => db.seasons.update(s.id, { active: i === 0 })),
-          );
-        }
+    if (removedTombstones.length > 0) {
+      await db.tombstones.bulkPut(removedTombstones);
+    }
+    // Anything present in the backup is explicitly alive again.
+    const revived: string[] = [];
+    for (const table of SYNC_TABLE_NAMES) {
+      for (const row of backup[BACKUP_TABLE_KEYS[table]] as { id: string }[]) {
+        revived.push(`${table}:${row.id}`);
       }
+    }
+    await db.tombstones.bulkDelete(revived);
   });
 
   return {
@@ -97,6 +118,24 @@ export async function restoreBackup(raw: unknown, mode: ImportMode): Promise<Imp
       matchEvents: backup.matchEvents.length,
     },
   };
+}
+
+async function collectRemovedTombstones(backup: AppBackup) {
+  const ts = nowIso();
+  const rows: { id: string; table: SyncTableName; recordId: string; deletedAt: string }[] = [];
+  for (const table of SYNC_TABLE_NAMES) {
+    const keptIds = new Set(
+      (backup[BACKUP_TABLE_KEYS[table]] as { id: string }[]).map((r) => r.id),
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const existing: string[] = await (db as any)[table].toCollection().primaryKeys();
+    for (const id of existing) {
+      if (!keptIds.has(id)) {
+        rows.push({ id: `${table}:${id}`, table, recordId: id, deletedAt: ts });
+      }
+    }
+  }
+  return rows;
 }
 
 export function parseMatchExport(raw: unknown): MatchExport {

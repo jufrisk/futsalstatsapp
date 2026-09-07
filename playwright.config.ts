@@ -23,5 +23,11 @@ export default defineConfig({
     url: "http://localhost:4173",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    // Keep E2E hermetic: build without cloud sync regardless of any local .env.
+    env: {
+      VITE_SUPABASE_URL: "",
+      VITE_SUPABASE_ANON_KEY: "",
+      VITE_SUPABASE_PUBLISHABLE_KEY: "",
+    },
   },
 });

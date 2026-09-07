@@ -4,6 +4,7 @@ import { useActiveSeason, usePlayers, useTeam } from "@/app/hooks";
 import { EmptyState, PageHeader, Spinner } from "@/components/ui";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { useToast } from "@/app/toast";
+import { useAdmin } from "@/app/adminAuth";
 import { deletePlayer } from "@/db/repositories";
 import { playerLabel } from "@/domain/format";
 import { useSeasonStatistics } from "@/features/season/useSeasonStats";
@@ -16,11 +17,19 @@ export function PlayersPage() {
   const players = usePlayers(team?.id);
   const toast = useToast();
   const navigate = useNavigate();
+  const { ensureAdmin } = useAdmin();
   const { data: seasonStats } = useSeasonStatistics(season?.id, players);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Player | null>(null);
 
   if (!team) return <Spinner />;
+
+  const startCreate = async () => {
+    if (await ensureAdmin()) setCreating(true);
+  };
+  const startEdit = async (p: Player) => {
+    if (await ensureAdmin()) setEditing(p);
+  };
 
   const statFor = (playerId: string) =>
     seasonStats?.players.find((p) => p.playerId === playerId);
@@ -31,7 +40,7 @@ export function PlayersPage() {
         title="Pelaajat"
         subtitle={team.name}
         actions={
-          <button className="btn-primary" onClick={() => setCreating(true)}>
+          <button className="btn-primary" data-testid="add-player" onClick={startCreate}>
             + Lisää pelaaja
           </button>
         }
@@ -40,9 +49,9 @@ export function PlayersPage() {
       {players.length === 0 ? (
         <EmptyState
           title="Ei pelaajia"
-          hint="Pelinumero on pakollinen, nimi valinnainen."
+          hint="Pelinumero on pakollinen, nimi valinnainen. Muokkaus vaatii salasanan."
           action={
-            <button className="btn-primary" onClick={() => setCreating(true)}>
+            <button className="btn-primary" data-testid="add-player" onClick={startCreate}>
               + Lisää pelaaja
             </button>
           }
@@ -64,13 +73,14 @@ export function PlayersPage() {
                     </span>
                   )}
                 </button>
-                <button className="btn-ghost px-2" onClick={() => setEditing(p)}>
+                <button className="btn-ghost px-2" onClick={() => void startEdit(p)}>
                   ✎
                 </button>
                 <ConfirmButton
                   className="btn-ghost px-2"
                   confirmLabel="Poista?"
                   onConfirm={async () => {
+                    if (!(await ensureAdmin())) return;
                     try {
                       await deletePlayer(p.id);
                       toast.push("Pelaaja poistettu", "success");

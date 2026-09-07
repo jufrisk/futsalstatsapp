@@ -3,17 +3,28 @@ import { useEffect, useState } from "react";
 import { db } from "@/db/database";
 import { ensureBootstrap, listMatchEvents, getMatchRoster } from "@/db/repositories";
 import type { Match, MatchEvent, MatchPlayer, Player, Season, Team } from "@/domain/types";
+import { forceSync, startSync, syncConfigured } from "@/services/sync";
+import { ACTIVE_SEASON_EVENT, getStoredActiveSeasonId } from "./activeSeason";
 
 export function useBootstrap(): boolean {
   const [ready, setReady] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    ensureBootstrap()
-      .then(() => !cancelled && setReady(true))
-      .catch((err) => {
+    (async () => {
+      try {
+        if (syncConfigured) {
+          // Pull the shared data first so a fresh device doesn't create a
+          // duplicate team/season before it learns about the cloud one.
+          startSync();
+          await forceSync().catch(() => undefined);
+        }
+        await ensureBootstrap();
+      } catch (err) {
         console.error("bootstrap failed", err);
+      } finally {
         if (!cancelled) setReady(true);
-      });
+      }
+    })();
     return () => {
       cancelled = true;
     };
@@ -36,10 +47,21 @@ export function useSeasons(): Season[] {
 }
 
 export function useActiveSeason(): Season | undefined {
-  return useLiveQuery(async () => {
-    const active = await db.seasons.filter((s) => s.active).first();
-    return active ?? (await db.seasons.toCollection().first());
+  const seasons = useSeasons();
+  const [storedId, setStoredId] = useState<string | null>(() => getStoredActiveSeasonId());
+
+  useEffect(() => {
+    const update = () => setStoredId(getStoredActiveSeasonId());
+    window.addEventListener(ACTIVE_SEASON_EVENT, update);
+    window.addEventListener("storage", update);
+    return () => {
+      window.removeEventListener(ACTIVE_SEASON_EVENT, update);
+      window.removeEventListener("storage", update);
+    };
   }, []);
+
+  if (seasons.length === 0) return undefined;
+  return seasons.find((s) => s.id === storedId) ?? seasons[0];
 }
 
 export function usePlayers(teamId: string | undefined, includeInactive = false): Player[] {

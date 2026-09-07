@@ -1,5 +1,6 @@
-import { db } from "./database";
+import { db, recordTombstone } from "./database";
 import { newId, nowIso } from "@/domain/ids";
+import { getStoredActiveSeasonId, setStoredActiveSeasonId } from "@/app/activeSeason";
 import type {
   GoalSituation,
   Match,
@@ -84,8 +85,12 @@ export function listSeasons(): Promise<Season[]> {
 }
 
 export async function getActiveSeason(): Promise<Season | undefined> {
-  const active = await db.seasons.filter((s) => s.active).first();
-  return active ?? (await db.seasons.toCollection().first());
+  const seasons = await db.seasons.toArray();
+  if (seasons.length === 0) return undefined;
+  const storedId = getStoredActiveSeasonId();
+  const chosen = storedId && seasons.find((s) => s.id === storedId);
+  if (chosen) return chosen;
+  return [...seasons].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 }
 
 export async function createSeason(name: string, activate = true): Promise<Season> {
@@ -100,22 +105,13 @@ export async function createSeason(name: string, activate = true): Promise<Seaso
     updatedAt: ts,
   };
   await db.seasons.add(season);
-  if (activate) await setActiveSeason(season.id);
+  if (activate) setActiveSeason(season.id);
   return season;
 }
 
-export async function setActiveSeason(seasonId: string): Promise<void> {
-  await db.transaction("rw", db.seasons, async () => {
-    const all = await db.seasons.toArray();
-    await Promise.all(
-      all.map((s) =>
-        db.seasons.update(s.id, {
-          active: s.id === seasonId,
-          updatedAt: nowIso(),
-        }),
-      ),
-    );
-  });
+/** Per-device selection only — never written to the DB, never synced. */
+export function setActiveSeason(seasonId: string): void {
+  setStoredActiveSeasonId(seasonId);
 }
 
 export async function renameSeason(seasonId: string, name: string): Promise<void> {
@@ -128,17 +124,11 @@ export async function deleteSeason(seasonId: string): Promise<void> {
   const matches = await db.matches.where("seasonId").equals(seasonId).toArray();
   await db.transaction(
     "rw",
-    db.seasons,
-    db.matches,
-    db.matchPlayers,
-    db.matchEvents,
+    [db.seasons, db.matches, db.matchPlayers, db.matchEvents, db.tombstones],
     async () => {
       for (const m of matches) await deleteMatchInternal(m.id);
       await db.seasons.delete(seasonId);
-      const remaining = await db.seasons.toArray();
-      if (remaining.length > 0 && !remaining.some((s) => s.active)) {
-        await db.seasons.update(remaining[0]!.id, { active: true, updatedAt: nowIso() });
-      }
+      await recordTombstone("seasons", seasonId);
     },
   );
 }
@@ -218,7 +208,10 @@ export async function updatePlayer(
 export async function deletePlayer(playerId: string): Promise<void> {
   // Roster snapshots (MatchPlayer) keep historical numbers, so a hard delete of
   // the master record is safe for past matches.
-  await db.players.delete(playerId);
+  await db.transaction("rw", [db.players, db.tombstones], async () => {
+    await db.players.delete(playerId);
+    await recordTombstone("players", playerId);
+  });
 }
 
 /* ============================================================================
@@ -278,14 +271,37 @@ export async function updateMatch(
 }
 
 async function deleteMatchInternal(matchId: string): Promise<void> {
+  const [eventIds, rosterIds] = await Promise.all([
+    db.matchEvents.where("matchId").equals(matchId).primaryKeys(),
+    db.matchPlayers.where("matchId").equals(matchId).primaryKeys(),
+  ]);
   await db.matchEvents.where("matchId").equals(matchId).delete();
   await db.matchPlayers.where("matchId").equals(matchId).delete();
   await db.matches.delete(matchId);
+
+  const ts = nowIso();
+  await db.tombstones.bulkPut([
+    { id: `matches:${matchId}`, table: "matches", recordId: matchId, deletedAt: ts },
+    ...eventIds.map((id) => ({
+      id: `matchEvents:${String(id)}`,
+      table: "matchEvents" as const,
+      recordId: String(id),
+      deletedAt: ts,
+    })),
+    ...rosterIds.map((id) => ({
+      id: `matchPlayers:${String(id)}`,
+      table: "matchPlayers" as const,
+      recordId: String(id),
+      deletedAt: ts,
+    })),
+  ]);
 }
 
 export async function deleteMatch(matchId: string): Promise<void> {
-  await db.transaction("rw", db.matches, db.matchPlayers, db.matchEvents, () =>
-    deleteMatchInternal(matchId),
+  await db.transaction(
+    "rw",
+    [db.matches, db.matchPlayers, db.matchEvents, db.tombstones],
+    () => deleteMatchInternal(matchId),
   );
 }
 
@@ -324,6 +340,7 @@ export async function ensureRosterRows(matchId: string, teamId: string): Promise
         playerName: p.name,
         selected: false,
         startingLineup: false,
+        updatedAt: nowIso(),
       }));
     if (additions.length > 0) await db.matchPlayers.bulkAdd(additions);
   });
@@ -335,7 +352,7 @@ export async function setRosterSelected(
   selected: boolean,
 ): Promise<void> {
   const mp = await findRosterRow(matchId, playerId);
-  const patch: Partial<MatchPlayer> = { selected };
+  const patch: Partial<MatchPlayer> = { selected, updatedAt: nowIso() };
   if (!selected) patch.startingLineup = false;
   await db.matchPlayers.update(mp.id, patch);
   await refreshMatchReadiness(matchId);
@@ -349,7 +366,10 @@ export async function setRosterNumber(
   const check = validateJerseyNumber(numberInput);
   if (!check.ok) throw new Error(check.error);
   const mp = await findRosterRow(matchId, playerId);
-  await db.matchPlayers.update(mp.id, { playerNumber: Number(numberInput) });
+  await db.matchPlayers.update(mp.id, {
+    playerNumber: Number(numberInput),
+    updatedAt: nowIso(),
+  });
   await refreshMatchReadiness(matchId);
 }
 
@@ -361,6 +381,7 @@ export async function setRosterName(
   const mp = await findRosterRow(matchId, playerId);
   await db.matchPlayers.update(mp.id, {
     playerName: name?.trim() ? name.trim() : undefined,
+    updatedAt: nowIso(),
   });
 }
 
@@ -370,7 +391,7 @@ export async function toggleStarter(
   value: boolean,
 ): Promise<void> {
   const mp = await findRosterRow(matchId, playerId);
-  const patch: Partial<MatchPlayer> = { startingLineup: value };
+  const patch: Partial<MatchPlayer> = { startingLineup: value, updatedAt: nowIso() };
   if (value) patch.selected = true;
   await db.matchPlayers.update(mp.id, patch);
   await refreshMatchReadiness(matchId);
@@ -632,15 +653,19 @@ export async function updateEvent(
 }
 
 export async function deleteEvent(eventId: string): Promise<void> {
-  await db.matchEvents.delete(eventId);
+  await db.transaction("rw", [db.matchEvents, db.tombstones], async () => {
+    await db.matchEvents.delete(eventId);
+    await recordTombstone("matchEvents", eventId);
+  });
 }
 
 export async function undoLastEvent(matchId: string): Promise<MatchEvent | undefined> {
-  return db.transaction("rw", db.matchEvents, async () => {
+  return db.transaction("rw", [db.matchEvents, db.tombstones], async () => {
     const events = await listMatchEvents(matchId);
     const last = events.at(-1);
     if (!last) return undefined;
     await db.matchEvents.delete(last.id);
+    await recordTombstone("matchEvents", last.id);
     return last;
   });
 }

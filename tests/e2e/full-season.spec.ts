@@ -12,6 +12,11 @@ test.beforeEach(async ({ page }) => {
   await page.evaluate(
     () =>
       new Promise<void>((resolve) => {
+        try {
+          localStorage.clear();
+        } catch {
+          /* ignore */
+        }
         const req = indexedDB.deleteDatabase("FutsalStats");
         req.onsuccess = req.onerror = req.onblocked = () => resolve();
       }),
@@ -21,6 +26,13 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("full season lifecycle with live stats, corrections and backup", async ({ page }) => {
+  // ---------- Unlock editing (shared password) ----------
+  await page.getByRole("link", { name: "Asetukset" }).click();
+  await page.getByTestId("admin-unlock").click();
+  await page.getByTestId("admin-password").fill("MuutaTuloksia");
+  await page.getByTestId("admin-submit").click();
+  await expect(page.getByTestId("admin-lock")).toBeVisible();
+
   // ---------- Players ----------
   await page.getByRole("link", { name: "Pelaajat" }).click();
 
@@ -179,4 +191,28 @@ test("full season lifecycle with live stats, corrections and backup", async ({ p
   await page.getByRole("link", { name: "Ottelut" }).click();
   await expect(page.getByText("vs FC Team B")).toBeVisible();
   await expect(page.getByText("2–1")).toBeVisible();
+});
+
+test("editing the player list is gated by the shared password", async ({ page }) => {
+  await page.getByRole("link", { name: "Pelaajat" }).click();
+
+  // Locked: adding a player asks for the password.
+  await page.getByTestId("add-player").first().click();
+  await expect(page.getByTestId("admin-password")).toBeVisible();
+
+  // Wrong password is rejected.
+  await page.getByTestId("admin-password").fill("wrong");
+  await page.getByTestId("admin-submit").click();
+  await expect(page.getByText("Väärä salasana.")).toBeVisible();
+
+  // Correct password unlocks and the player form opens.
+  await page.getByTestId("admin-password").fill("MuutaTuloksia");
+  await page.getByTestId("admin-submit").click();
+  await page.getByTestId("player-number").fill("5");
+  await page.getByTestId("player-save").click();
+  await expect(page.getByText("#5", { exact: true })).toBeVisible();
+
+  // Stays unlocked afterwards.
+  await page.getByTestId("add-player").first().click();
+  await expect(page.getByTestId("player-number")).toBeVisible();
 });

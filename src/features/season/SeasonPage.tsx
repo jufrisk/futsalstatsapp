@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useActiveSeason, usePlayers, useSeasons, useTeam } from "@/app/hooks";
 import { EmptyState, PageHeader, Spinner, StatBadge } from "@/components/ui";
 import { useToast } from "@/app/toast";
+import { useAdmin } from "@/app/adminAuth";
 import { createSeason, setActiveSeason } from "@/db/repositories";
 import { useSeasonStatistics } from "./useSeasonStats";
 
@@ -13,6 +14,7 @@ export function SeasonPage() {
   const players = usePlayers(team?.id, true);
   const toast = useToast();
   const navigate = useNavigate();
+  const { ensureAdmin } = useAdmin();
   const { data, loading } = useSeasonStatistics(active?.id, players);
   const [newName, setNewName] = useState("");
 
@@ -33,7 +35,7 @@ export function SeasonPage() {
             <select
               className="input"
               value={active.id}
-              onChange={(e) => setActiveSeason(e.target.value).catch(toast.error)}
+              onChange={(e) => setActiveSeason(e.target.value)}
             >
               {seasons.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -58,6 +60,7 @@ export function SeasonPage() {
               className="btn-secondary"
               disabled={!newName.trim()}
               onClick={async () => {
+                if (!(await ensureAdmin())) return;
                 try {
                   await createSeason(newName.trim());
                   setNewName("");

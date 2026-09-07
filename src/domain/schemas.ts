@@ -73,6 +73,9 @@ export const matchPlayerSchema = z.object({
   playerName: z.string().trim().min(1).optional(),
   selected: z.boolean(),
   startingLineup: z.boolean(),
+  // Optional so v1 backups still validate; set by every roster mutation and
+  // used as the last-write-wins key during multi-device sync.
+  updatedAt: isoDateTime.optional(),
 });
 
 /* ----------------------------------------------------------------------------

@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { PageHeader, Spinner, StatBadge, Tabs } from "@/components/ui";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { useToast } from "@/app/toast";
+import { useAdmin } from "@/app/adminAuth";
 import { useMatchData } from "@/features/matches/useMatchData";
 import type { MatchEvent } from "@/domain/types";
 import { deleteMatch, recordOpponentGoal, recordOwnGoal, resumeMatch } from "@/db/repositories";
@@ -27,6 +28,7 @@ export function MatchViewPage() {
   const { matchId } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
+  const { ensureAdmin } = useAdmin();
   const data = useMatchData(matchId);
   const { match, roster, events, state, stats, labelOf } = data;
   const [tab, setTab] = useState<TabId>("summary");
@@ -35,6 +37,16 @@ export function MatchViewPage() {
 
   if (match === undefined) return <Spinner />;
   if (!match) return <Navigate to="/" replace />;
+
+  // Editing the results of a finished match requires the shared password.
+  const editGated = match.status === "FINISHED";
+  const guard = async (): Promise<boolean> => (editGated ? ensureAdmin() : true);
+  const openEditor = async (e: MatchEvent) => {
+    if (await guard()) setEditingEvent(e);
+  };
+  const startAdd = async (kind: "own" | "opponent") => {
+    if (await guard()) setAddKind(kind);
+  };
 
   const filePart = `${formatFiDate(match.date)}-${safeFilePart(match.opponentName)}`;
 
@@ -66,6 +78,7 @@ export function MatchViewPage() {
             <button
               className="btn-secondary"
               onClick={async () => {
+                if (!(await guard())) return;
                 await resumeMatch(match.id);
                 navigate(`/matches/${match.id}/live`);
               }}
@@ -106,7 +119,7 @@ export function MatchViewPage() {
 
           <section className="card">
             <h2 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-300">Maalit</h2>
-            <GoalBreakdownList events={events} labelOf={labelOf} onPick={setEditingEvent} />
+            <GoalBreakdownList events={events} labelOf={labelOf} onPick={openEditor} />
           </section>
 
           <section className="card">
@@ -129,6 +142,7 @@ export function MatchViewPage() {
               className="btn-ghost"
               confirmLabel="Poista ottelu?"
               onConfirm={async () => {
+                if (!(await guard())) return;
                 await deleteMatch(match.id);
                 navigate("/");
               }}
@@ -197,17 +211,17 @@ export function MatchViewPage() {
             Jokainen maali ja siitä syntynyt oman joukkueen +/-. Rangaistusmaaleista
             (6 m / 10 m) ei kirjata +/-. Napauta riviä korjataksesi.
           </p>
-          <GoalBreakdownList events={events} labelOf={labelOf} onPick={setEditingEvent} />
+          <GoalBreakdownList events={events} labelOf={labelOf} onPick={openEditor} />
         </div>
       )}
 
       {tab === "events" && (
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap gap-2">
-            <button className="btn-secondary" onClick={() => setAddKind("own")}>
+            <button className="btn-secondary" onClick={() => void startAdd("own")}>
               + Oma maali
             </button>
-            <button className="btn-secondary" onClick={() => setAddKind("opponent")}>
+            <button className="btn-secondary" onClick={() => void startAdd("opponent")}>
               + Vastustajan maali
             </button>
           </div>
@@ -217,7 +231,7 @@ export function MatchViewPage() {
               <button
                 key={e.id}
                 data-testid={`event-${e.type}`}
-                onClick={() => setEditingEvent(e)}
+                onClick={() => void openEditor(e)}
                 className="flex w-full items-center gap-3 py-2.5 text-left"
               >
                 <span className="text-base">{eventIcon(e.type)}</span>
