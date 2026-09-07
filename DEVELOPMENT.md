@@ -78,6 +78,34 @@ Set `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` (see `.env.example`) and run
 - **Bundle** – `@supabase/supabase-js` is split into its own `supabase` chunk and is
   cached by the service worker after first load.
 
+## Palloliitto / Torneopal import (`scripts/import-torneopal.mjs`)
+
+One-off prefill of the fixture list + a team's roster from the public Torneopal
+**widget** endpoint (needs only the club's widget key — no server, no REST key).
+
+```bash
+npm run import:torneopal -- --base my-backup.json      # merge into an existing app
+npm run import:torneopal                               # or: fresh backup (new team+season)
+```
+
+Fetches the `schedule` widget (competition/class/group) and `team_players` widget
+(team id), parses the returned HTML tables, and writes a `torneopal-import.json` in the
+app's backup format. Load it via **Asetukset → Palauta varmuuskopio**. Details:
+
+- Only matches involving `--team-name` (default `GFT`) are imported: upcoming as `DRAFT`
+  (opponent + date + venue prefilled), already-played as `FINISHED` with **synthetic
+  score-only events** (`source: "PALLOLIITTO"`, empty lineup → correct score + record,
+  zero +/-). `--no-results` imports everything as `DRAFT`.
+- Ids are deterministic (`uuidv5` of the Torneopal match number / `teamId:number`), so
+  re-running updates the same rows (e.g. fills in results) rather than duplicating.
+  Matches carry `source` + `externalMatchId`; players carry `externalPlayerId` — for a
+  later reconciliation flow against the official REST API.
+- Flags: `--key`, `--team-id`, `--team-name`, `--competition`, `--class`, `--group`,
+  `--season-name`, `--flip-names` ("First Last"), `--out`.
+- It scrapes widget HTML, so it's fragile if Torneopal changes the markup. The proper
+  long-term path is the Taso REST API (`getMatches`/`getPlayers`, stable ids), which
+  needs a separate key from `taso.palloliitto.fi` and a small serverless proxy.
+
 ## Edit password
 
 `src/app/adminAuth.tsx` – shared secret `"MuutaTuloksia"`, **client-side gate only**

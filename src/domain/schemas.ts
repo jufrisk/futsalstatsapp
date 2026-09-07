@@ -43,6 +43,8 @@ export const playerSchema = z.object({
   updatedAt: isoDateTime,
   // Soft delete — kept so the removal syncs (players live in their own DB table).
   deletedAt: isoDateTime.optional(),
+  // Link to an external roster (e.g. Palloliitto / Taso). MVP: unused by the UI.
+  externalPlayerId: z.string().optional(),
 });
 
 /* ----------------------------------------------------------------------------
@@ -62,6 +64,9 @@ export const matchSchema = z.object({
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
   finishedAt: z.string().optional(),
+  // Provenance for imported / reconciled fixtures (Palloliitto / Taso).
+  source: z.enum(["MANUAL", "PALLOLIITTO", "RECONCILED"]).optional(),
+  externalMatchId: z.string().optional(),
 });
 
 /* ----------------------------------------------------------------------------
