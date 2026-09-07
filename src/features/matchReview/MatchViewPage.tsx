@@ -20,7 +20,12 @@ import { formatMatchTime } from "@/services/matchTime";
 import { GoalDialog } from "@/features/liveMatch/GoalDialog";
 import { EventEditorModal } from "@/features/liveMatch/EventEditorModal";
 import { GoalBreakdownList } from "@/features/liveMatch/GoalBreakdownList";
-import { describeEvent, eventIcon, eventTitle } from "@/features/liveMatch/eventDescribe";
+import {
+  describeEvent,
+  eventIcon,
+  eventTitle,
+  isListedEvent,
+} from "@/features/liveMatch/eventDescribe";
 
 type TabId = "summary" | "players" | "goals" | "events";
 
@@ -47,6 +52,8 @@ export function MatchViewPage() {
   const startAdd = async (kind: "own" | "opponent") => {
     if (await guard()) setAddKind(kind);
   };
+
+  const listedEvents = events.filter(isListedEvent);
 
   const filePart = `${formatFiDate(match.date)}-${safeFilePart(match.opponentName)}`;
 
@@ -226,8 +233,10 @@ export function MatchViewPage() {
             </button>
           </div>
           <div className="card divide-y divide-slate-800">
-            {events.length === 0 && <p className="py-2 text-sm text-slate-500">Ei tapahtumia.</p>}
-            {events.map((e) => (
+            {listedEvents.length === 0 && (
+              <p className="py-2 text-sm text-slate-500">Ei tapahtumia.</p>
+            )}
+            {listedEvents.map((e) => (
               <button
                 key={e.id}
                 data-testid={`event-${e.type}`}

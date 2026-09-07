@@ -7,10 +7,12 @@ Do this once. Until you do, the app works exactly as before — data stays on ea
 2. Pick a name and a database password (you won't need the password again). Free tier is fine.
 3. Wait ~2 minutes for it to provision.
 
-## 2. Create the table
+## 2. Create the tables
 1. Left sidebar → **SQL Editor** → **New query**.
 2. Paste the whole contents of [`supabase/schema.sql`](supabase/schema.sql) and click **Run**.
-   It should say "Success".
+   It should say "Success". It creates `app_state` (one JSON row for matches/seasons/
+   events) and `players` (one row per player). The file is safe to re-run any time — do
+   that whenever `supabase/schema.sql` changes.
 
 ## 3. Copy your keys
 Left sidebar → **Project Settings** → **API**:

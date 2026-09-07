@@ -5,18 +5,17 @@ import { snapshotsEqual } from "./merge";
 
 export async function buildLocalSnapshot(): Promise<SyncSnapshot> {
   const snap = emptySnapshot();
-  const [seasons, teams, players, matches, matchPlayers, matchEvents, tombstones] =
+  const [seasons, teams, matches, matchPlayers, matchEvents, tombstones] =
     await Promise.all([
       db.seasons.toArray(),
       db.teams.toArray(),
-      db.players.toArray(),
       db.matches.toArray(),
       db.matchPlayers.toArray(),
       db.matchEvents.toArray(),
       db.tombstones.toArray(),
     ]);
 
-  snap.tables = { seasons, teams, players, matches, matchPlayers, matchEvents };
+  snap.tables = { seasons, teams, matches, matchPlayers, matchEvents };
 
   const tomb: TombstoneMap = {};
   for (const t of tombstones) {

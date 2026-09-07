@@ -17,7 +17,7 @@ import {
 import { GoalDialog } from "./GoalDialog";
 import { EventEditorModal } from "./EventEditorModal";
 import { GoalBreakdownList } from "./GoalBreakdownList";
-import { describeEvent, eventIcon } from "./eventDescribe";
+import { describeEvent, eventIcon, isListedEvent } from "./eventDescribe";
 
 export function LiveMatchPage() {
   const { matchId } = useParams();
@@ -104,7 +104,7 @@ export function LiveMatchPage() {
     navigate(`/matches/${match.id}/stats`);
   };
 
-  const recent = [...events].reverse().slice(0, 6);
+  const recent = [...events].filter(isListedEvent).reverse().slice(0, 6);
   const lineupWarning = state.lineupPlayerIds.length !== 5;
 
   return (

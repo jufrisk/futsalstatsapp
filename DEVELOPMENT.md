@@ -57,8 +57,12 @@ Event log (MatchEvent[])  ─►  reducer  ─►  MatchState  ─►  match sta
 Set `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` (see `.env.example`) and run
 `supabase/schema.sql` once. Without them the app is local-only, exactly as before.
 
-- **Model** – the whole app state is one JSON document in `app_state.data` (one row),
-  guarded by a `version` counter. `src/services/sync/`:
+- **Players have their own Postgres table** (`public.players`, camelCase quoted columns,
+  soft delete via `deletedAt`) — visible/queryable in the Supabase Table Editor.
+  `src/services/sync/players.ts` merges it (LWW by `updatedAt`); everything else is the
+  JSON document below.
+- **Model** – the rest of the app state is one JSON document in `app_state.data` (one
+  row), guarded by a `version` counter. `src/services/sync/`:
   - `merge.ts` – pure per-record merge: newest `updatedAt` wins; a tombstone wins unless
     the record was touched after it was deleted. Order-independent + idempotent (tested).
   - `snapshot.ts` – build the doc from IndexedDB / apply a merged doc back into it.
@@ -105,6 +109,9 @@ clearing data in Settings. Running a live match and creating a new match are **n
   table still carry a per-player +/- column (original spec).
 - Undo = delete the last event and recompute. Any event can be opened, edited or deleted;
   all stats rebuild afterwards. A `FINISHED` match is still fully editable.
+- The event lists (live "recent", match "Tapahtumat") show **goals only** — substitutions
+  are still recorded (they carry the on-court lineup for +/-) but hidden via
+  `isListedEvent()`. Fouls / yellow + red cards are a later addition.
 - No running match clock – the official time is typed per goal (custom numpad).
 
 ## PWA / hosting

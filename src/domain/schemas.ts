@@ -41,6 +41,8 @@ export const playerSchema = z.object({
   active: z.boolean(),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
+  // Soft delete — kept so the removal syncs (players live in their own DB table).
+  deletedAt: isoDateTime.optional(),
 });
 
 /* ----------------------------------------------------------------------------

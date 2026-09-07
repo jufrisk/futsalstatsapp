@@ -1,17 +1,10 @@
 import type { SyncTableName } from "@/db/database";
-import type {
-  Match,
-  MatchEvent,
-  MatchPlayer,
-  Player,
-  Season,
-  Team,
-} from "@/domain/types";
+import type { Match, MatchEvent, MatchPlayer, Season, Team } from "@/domain/types";
 
+/** `players` is synced via its own Postgres table, not this document. */
 export interface SnapshotTables {
   seasons: Season[];
   teams: Team[];
-  players: Player[];
   matches: Match[];
   matchPlayers: MatchPlayer[];
   matchEvents: MatchEvent[];
@@ -34,7 +27,6 @@ export interface SyncSnapshot {
 export const SYNC_SNAPSHOT_TABLES: (keyof SnapshotTables)[] = [
   "seasons",
   "teams",
-  "players",
   "matches",
   "matchPlayers",
   "matchEvents",
@@ -46,7 +38,6 @@ export function emptySnapshot(): SyncSnapshot {
     tables: {
       seasons: [],
       teams: [],
-      players: [],
       matches: [],
       matchPlayers: [],
       matchEvents: [],

@@ -8,10 +8,13 @@ import type {
   Team,
 } from "@/domain/types";
 
+/**
+ * Tables whose whole content lives in the shared `app_state` JSON document.
+ * `players` is NOT here — it has its own Postgres table (see services/sync/players.ts).
+ */
 export type SyncTableName =
   | "seasons"
   | "teams"
-  | "players"
   | "matches"
   | "matchPlayers"
   | "matchEvents";
@@ -64,7 +67,6 @@ export const ALL_TABLES = [
 export const SYNC_TABLE_NAMES: SyncTableName[] = [
   "seasons",
   "teams",
-  "players",
   "matches",
   "matchPlayers",
   "matchEvents",

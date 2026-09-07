@@ -3,6 +3,7 @@ import { syncConfigured, getSupabase, APP_STATE_TABLE } from "./supabaseClient";
 import { pullRemote, pushRemote } from "./remoteStore";
 import { buildLocalSnapshot, applySnapshot } from "./snapshot";
 import { mergeSnapshots, snapshotsEqual } from "./merge";
+import { mergePlayers, pullPlayers, pushPlayers } from "./players";
 
 export type SyncState = "disabled" | "idle" | "syncing" | "offline" | "error";
 
@@ -60,6 +61,10 @@ export async function runSync(): Promise<void> {
   setStatus({ state: "syncing" });
 
   try {
+    // 1. Players — their own Postgres table.
+    await syncPlayers();
+
+    // 2. Everything else — the shared JSON document.
     let attempt = 0;
     // Retry loop handles a concurrent push landing between our pull and push.
     while (attempt < MAX_PUSH_RETRIES) {
@@ -100,6 +105,31 @@ export async function runSync(): Promise<void> {
       void runSync();
     }
   }
+}
+
+/** Pull the players table, merge with local, apply, and push what's newer here. */
+async function syncPlayers(): Promise<void> {
+  const remotePlayers = await pullPlayers();
+  if (!remotePlayers) return;
+
+  const localPlayers = await db.players.toArray();
+  const merged = mergePlayers(localPlayers, remotePlayers);
+
+  applyingRemote = true;
+  try {
+    const localById = new Map(localPlayers.map((p) => [p.id, JSON.stringify(p)]));
+    const changed = merged.filter((p) => localById.get(p.id) !== JSON.stringify(p));
+    if (changed.length > 0) await db.players.bulkPut(merged);
+  } finally {
+    applyingRemote = false;
+  }
+
+  const remoteById = new Map(remotePlayers.map((p) => [p.id, p]));
+  const toPush = merged.filter((p) => {
+    const r = remoteById.get(p.id);
+    return !r || (p.updatedAt ?? "") > (r.updatedAt ?? "");
+  });
+  if (toPush.length > 0) await pushPlayers(toPush);
 }
 
 export function scheduleSync(delayMs = 1500): void {
@@ -143,10 +173,15 @@ export function startSync(): void {
   // Other devices' writes → near-immediate pull (free realtime tier).
   const supabase = getSupabase();
   supabase
-    ?.channel("app_state_changes")
+    ?.channel("shared_changes")
     .on(
       "postgres_changes",
-      { event: "UPDATE", schema: "public", table: APP_STATE_TABLE },
+      { event: "*", schema: "public", table: APP_STATE_TABLE },
+      () => scheduleSync(300),
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "players" },
       () => scheduleSync(300),
     )
     .subscribe();

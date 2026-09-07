@@ -38,11 +38,42 @@ create policy "anon can insert app_state"
   to anon, authenticated
   with check (id = 'main');
 
+-- ---------------------------------------------------------------------------
+-- Players get their own table (shared reference data). Column names are
+-- camelCase (quoted) to match the app's model 1:1. Deletion is soft
+-- (`deletedAt`); roster snapshots keep historical numbers regardless.
+-- ---------------------------------------------------------------------------
+create table if not exists public.players (
+  id          uuid primary key,
+  "teamId"    uuid not null,
+  number      integer not null,
+  name        text,
+  active      boolean not null default true,
+  "createdAt" timestamptz not null default now(),
+  "updatedAt" timestamptz not null default now(),
+  "deletedAt" timestamptz
+);
+
+alter table public.players enable row level security;
+
+drop policy if exists "anon can read players" on public.players;
+create policy "anon can read players"
+  on public.players for select to anon, authenticated using (true);
+
+drop policy if exists "anon can write players" on public.players;
+create policy "anon can write players"
+  on public.players for all to anon, authenticated using (true) with check (true);
+
 -- Enable realtime so other devices update within ~1s (free tier).
 -- Wrapped so re-running the whole file is safe.
 do $$
 begin
   alter publication supabase_realtime add table public.app_state;
-exception
-  when duplicate_object then null;
+exception when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.players;
+exception when duplicate_object then null;
 end $$;

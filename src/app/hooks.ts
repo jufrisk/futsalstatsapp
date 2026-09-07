@@ -70,7 +70,7 @@ export function usePlayers(teamId: string | undefined, includeInactive = false):
       if (!teamId) return [];
       const rows = await db.players.where("teamId").equals(teamId).toArray();
       return rows
-        .filter((p) => includeInactive || p.active)
+        .filter((p) => !p.deletedAt && (includeInactive || p.active))
         .sort((a, b) => a.number - b.number);
     }, [teamId, includeInactive]) ?? []
   );

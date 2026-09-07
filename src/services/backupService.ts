@@ -6,7 +6,7 @@ import {
   type SyncTableName,
 } from "@/db/database";
 import { appBackupSchema, matchExportSchema } from "@/domain/schemas";
-import type { AppBackup, MatchExport } from "@/domain/types";
+import type { AppBackup, MatchExport, Player } from "@/domain/types";
 import { nowIso } from "@/domain/ids";
 
 export async function buildBackup(): Promise<AppBackup> {
@@ -56,7 +56,6 @@ export interface ImportResult {
 const BACKUP_TABLE_KEYS: Record<SyncTableName, keyof AppBackup> = {
   seasons: "seasons",
   teams: "teams",
-  players: "players",
   matches: "matches",
   matchPlayers: "matchPlayers",
   matchEvents: "matchEvents",
@@ -79,10 +78,15 @@ export async function restoreBackup(raw: unknown, mode: ImportMode): Promise<Imp
     throw new Error(`Tuntematon schemaVersion: ${backup.schemaVersion}`);
   }
 
-  const removedTombstones =
-    mode === "replace" ? await collectRemovedTombstones(backup) : [];
-
+  let removedTombstones: Awaited<ReturnType<typeof collectRemovedTombstones>> = [];
+  let softDeletedPlayers: Player[] = [];
   if (mode === "replace") {
+    removedTombstones = await collectRemovedTombstones(backup);
+    const keptPlayerIds = new Set(backup.players.map((p) => p.id));
+    const ts = nowIso();
+    softDeletedPlayers = (await db.players.toArray())
+      .filter((p) => !keptPlayerIds.has(p.id) && !p.deletedAt)
+      .map((p) => ({ ...p, deletedAt: ts, updatedAt: ts }));
     await clearAllData();
   }
 
@@ -93,6 +97,12 @@ export async function restoreBackup(raw: unknown, mode: ImportMode): Promise<Imp
     await db.matches.bulkPut(backup.matches);
     await db.matchPlayers.bulkPut(backup.matchPlayers);
     await db.matchEvents.bulkPut(backup.matchEvents);
+
+    // Players use a soft delete (own table) rather than tombstones: a "replace"
+    // marks any player the backup dropped as deleted so the removal syncs.
+    if (softDeletedPlayers.length > 0) {
+      await db.players.bulkPut(softDeletedPlayers);
+    }
 
     if (removedTombstones.length > 0) {
       await db.tombstones.bulkPut(removedTombstones);

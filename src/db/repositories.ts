@@ -144,7 +144,7 @@ export function listPlayers(teamId: string, includeInactive = false): Promise<Pl
     .toArray()
     .then((rows) =>
       rows
-        .filter((p) => includeInactive || p.active)
+        .filter((p) => !p.deletedAt && (includeInactive || p.active))
         .sort((a, b) => a.number - b.number),
     );
 }
@@ -206,12 +206,10 @@ export async function updatePlayer(
 }
 
 export async function deletePlayer(playerId: string): Promise<void> {
-  // Roster snapshots (MatchPlayer) keep historical numbers, so a hard delete of
-  // the master record is safe for past matches.
-  await db.transaction("rw", [db.players, db.tombstones], async () => {
-    await db.players.delete(playerId);
-    await recordTombstone("players", playerId);
-  });
+  // Soft delete so the removal syncs via the players table. Roster snapshots
+  // (MatchPlayer) keep the historical number/name, so past matches are unaffected.
+  const ts = nowIso();
+  await db.players.update(playerId, { deletedAt: ts, updatedAt: ts });
 }
 
 /* ============================================================================

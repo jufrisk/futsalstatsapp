@@ -2,6 +2,15 @@ import type { MatchEvent } from "@/domain/types";
 import { goalSituationTag } from "@/domain/goals";
 import { formatMatchTime } from "@/services/matchTime";
 
+/**
+ * Which event types appear in the human-facing event lists. Substitutions are
+ * still recorded (they carry the on-court lineup for +/-), but they are not
+ * shown — only goals matter. Fouls / yellow + red cards will be added later.
+ */
+export function isListedEvent(event: MatchEvent): boolean {
+  return event.type !== "SUBSTITUTION";
+}
+
 export function eventIcon(type: MatchEvent["type"]): string {
   switch (type) {
     case "OWN_GOAL":
