@@ -1,0 +1,5 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Hash routing is used, so no SPA redirect rule is required.

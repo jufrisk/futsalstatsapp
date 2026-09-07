@@ -1,0 +1,47 @@
+import Dexie, { type Table } from "dexie";
+import type {
+  Match,
+  MatchEvent,
+  MatchPlayer,
+  Player,
+  Season,
+  Team,
+} from "@/domain/types";
+
+export class FutsalStatsDatabase extends Dexie {
+  seasons!: Table<Season, string>;
+  teams!: Table<Team, string>;
+  players!: Table<Player, string>;
+  matches!: Table<Match, string>;
+  matchPlayers!: Table<MatchPlayer, string>;
+  matchEvents!: Table<MatchEvent, string>;
+
+  constructor(name = "FutsalStats") {
+    super(name);
+    this.version(1).stores({
+      seasons: "id,name,active",
+      teams: "id,name",
+      players: "id,teamId,number,active",
+      matches: "id,seasonId,teamId,date,status",
+      matchPlayers: "id,matchId,playerId",
+      matchEvents: "id,matchId,sequence,type,period",
+    });
+  }
+}
+
+export const db = new FutsalStatsDatabase();
+
+export const ALL_TABLES = [
+  db.seasons,
+  db.teams,
+  db.players,
+  db.matches,
+  db.matchPlayers,
+  db.matchEvents,
+];
+
+export async function clearAllData(): Promise<void> {
+  await db.transaction("rw", ALL_TABLES, async () => {
+    await Promise.all(ALL_TABLES.map((t) => t.clear()));
+  });
+}
