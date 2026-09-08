@@ -68,9 +68,11 @@ Set `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` (see `.env.example`) and run
   - `snapshot.ts` – build the doc from IndexedDB / apply a merged doc back into it.
   - `remoteStore.ts` – pull, and optimistic push (`update … where version = base`).
   - `syncEngine.ts` – pull → merge → apply → push loop, retried on version conflict.
-    Triggered by: app start (before bootstrap), a Supabase **realtime** subscription on
-    `app_state` (free tier), a 60s interval, window focus / reconnect, and Dexie write
-    hooks (debounced 1.5s). Status is exposed via `useSyncStatus()`.
+    **Pull** happens only at "refresh moments": app start, window focus, reconnect, and
+    tapping the bottom status bar (`forceSync`). **Push** of your own edits still happens
+    automatically (Dexie write hooks, debounced 1.5s) so nothing is stranded on one
+    device. No realtime subscription, no polling loop — a left-open tab won't
+    auto-refresh. Status is a muted strip pinned to the bottom (`useSyncStatus()`).
 - **Deletes** propagate via a `tombstones` Dexie table (DB v2); `deletePlayer`,
   `deleteMatch`, `deleteEvent`, `undoLastEvent` and a `replace` restore write them.
 - **Which season you're viewing** is per-device (`src/app/activeSeason.ts`, localStorage)

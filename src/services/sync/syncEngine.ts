@@ -1,5 +1,5 @@
 import { db, ALL_TABLES } from "@/db/database";
-import { syncConfigured, getSupabase, APP_STATE_TABLE } from "./supabaseClient";
+import { syncConfigured } from "./supabaseClient";
 import { pullRemote, pushRemote } from "./remoteStore";
 import { buildLocalSnapshot, applySnapshot } from "./snapshot";
 import { mergeSnapshots, snapshotsEqual } from "./merge";
@@ -163,31 +163,17 @@ export function startSync(): void {
     return;
   }
 
-  // Local writes → debounced push.
+  // Your own edits still get pushed out (debounced) so nothing is stranded on
+  // one device — but there is no realtime subscription and no polling loop.
   for (const table of [...ALL_TABLES, db.tombstones]) {
     table.hook("creating", () => scheduleSync());
     table.hook("updating", () => scheduleSync());
     table.hook("deleting", () => scheduleSync());
   }
 
-  // Other devices' writes → near-immediate pull (free realtime tier).
-  const supabase = getSupabase();
-  supabase
-    ?.channel("shared_changes")
-    .on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: APP_STATE_TABLE },
-      () => scheduleSync(300),
-    )
-    .on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: "players" },
-      () => scheduleSync(300),
-    )
-    .subscribe();
-
-  // Fallbacks: periodic, on focus, on reconnect.
-  setInterval(() => void runSync(), 60_000);
+  // Pull other devices' changes only at natural "refresh" moments: opening the
+  // app, bringing the tab back into focus, reconnecting, or tapping the status
+  // bar. (A left-open device won't auto-refresh; that's intentional.)
   if (typeof window !== "undefined") {
     window.addEventListener("focus", () => scheduleSync(300));
     window.addEventListener("online", () => scheduleSync(300));

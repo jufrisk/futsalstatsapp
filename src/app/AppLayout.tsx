@@ -11,8 +11,6 @@ const navItems = [
 ];
 
 export function AppLayout() {
-  const online = useOnlineStatus();
-
   return (
     <div className="mx-auto flex min-h-full max-w-5xl flex-col">
       <header className="sticky top-0 z-30 flex items-center justify-between gap-2 border-b border-slate-800 bg-slate-950/90 px-4 py-3 backdrop-blur">
@@ -51,66 +49,61 @@ export function AppLayout() {
         </nav>
       </header>
 
-      <div className="flex items-center justify-between gap-2 px-4 py-1.5 text-xs text-slate-400">
-        <AdminBadge />
-        <div className="flex items-center gap-2">
-          {!online && <span>Offline – tallentuu laitteelle</span>}
-          <SyncPill />
-        </div>
-      </div>
-
-      <main className="flex-1 px-4 pb-6 pt-2">
+      <main className="flex-1 px-4 pb-12 pt-4">
         <Outlet />
       </main>
+
+      <StatusBar />
     </div>
   );
 }
 
-function AdminBadge() {
+/** Thin, muted strip pinned to the bottom — easy to ignore. */
+function StatusBar() {
   const { unlocked } = useAdmin();
-  return (
-    <span className="inline-flex items-center gap-1">
-      {unlocked ? "🔓 Muokkaus avattu" : "🔒 Muokkaus lukittu"}
-    </span>
-  );
-}
-
-function SyncPill() {
+  const online = useOnlineStatus();
   const status = useSyncStatus();
-  if (!syncConfigured) return <span>Vain tässä laitteessa</span>;
 
-  const label =
-    status.state === "syncing"
-      ? "Synkronoidaan…"
-      : status.state === "offline"
-        ? "Ei yhteyttä – yritetään uudelleen"
-        : status.state === "error"
-          ? "Synkronointivirhe"
-          : status.lastSyncedAt
-            ? `Synkronoitu ${new Date(status.lastSyncedAt).toLocaleTimeString("fi-FI", {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}`
-            : "Yhdistetty";
+  let syncText: string | null = null;
+  let dot = "bg-slate-600";
+  if (!online) {
+    syncText = "Offline – tallentuu laitteelle";
+    dot = "bg-amber-500";
+  } else if (!syncConfigured) {
+    syncText = "Vain tässä laitteessa";
+  } else if (status.state === "syncing") {
+    syncText = "Synkronoidaan…";
+    dot = "bg-sky-500";
+  } else if (status.state === "offline") {
+    syncText = "Ei yhteyttä";
+    dot = "bg-amber-500";
+  } else if (status.state === "error") {
+    syncText = "Synkronointivirhe";
+    dot = "bg-amber-500";
+  } else if (status.lastSyncedAt) {
+    syncText = `Synkronoitu ${new Date(status.lastSyncedAt).toLocaleTimeString("fi-FI", {
+      hour: "2-digit",
+      minute: "2-digit",
+    })}`;
+    dot = "bg-emerald-600";
+  }
 
   return (
-    <button
-      className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 hover:bg-slate-800"
-      onClick={() => void forceSync()}
-      title="Päivitä nyt"
-      data-testid="sync-refresh"
-    >
-      <span
-        className={[
-          "h-1.5 w-1.5 rounded-full",
-          status.state === "syncing"
-            ? "animate-pulse bg-sky-400"
-            : status.state === "offline" || status.state === "error"
-              ? "bg-amber-400"
-              : "bg-emerald-400",
-        ].join(" ")}
-      />
-      {label}
-    </button>
+    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 border-t border-slate-800/70 bg-slate-950/85 px-4 py-1 backdrop-blur">
+      <div className="mx-auto flex max-w-5xl items-center justify-between text-[11px] text-slate-500">
+        <span>{unlocked ? "🔓 muokkaus auki" : "🔒 muokkaus lukittu"}</span>
+        {syncText && (
+          <button
+            className="pointer-events-auto inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 hover:text-slate-300"
+            onClick={() => void forceSync()}
+            title="Päivitä nyt"
+            data-testid="sync-refresh"
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+            {syncText}
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
