@@ -3,8 +3,11 @@ import { useEffect, useState } from "react";
 import { db } from "@/db/database";
 import { ensureBootstrap, listMatchEvents, getMatchRoster } from "@/db/repositories";
 import type { Match, MatchEvent, MatchPlayer, Player, Season, Team } from "@/domain/types";
-import { forceSync, startSync, syncConfigured } from "@/services/sync";
+import { forceSync, getSyncStatus, startSync, syncConfigured } from "@/services/sync";
 import { ACTIVE_SEASON_EVENT, getStoredActiveSeasonId } from "./activeSeason";
+
+const BOOTSTRAP_SYNC_RETRIES = 3;
+const BOOTSTRAP_SYNC_RETRY_DELAY_MS = 1000;
 
 export function useBootstrap(): boolean {
   const [ready, setReady] = useState(false);
@@ -14,9 +17,20 @@ export function useBootstrap(): boolean {
       try {
         if (syncConfigured) {
           // Pull the shared data first so a fresh device doesn't create a
-          // duplicate team/season before it learns about the cloud one.
+          // duplicate team/season before it learns about the cloud one. A
+          // transient failure (cold network, DNS not ready yet) must not be
+          // read as "the cloud is genuinely empty" — that would make
+          // ensureBootstrap() below fabricate a brand-new team/season, which
+          // then syncs out as a permanent duplicate. So retry a few times
+          // before falling back to local-only bootstrap.
           startSync();
-          await forceSync().catch(() => undefined);
+          for (let attempt = 0; attempt <= BOOTSTRAP_SYNC_RETRIES && !cancelled; attempt++) {
+            await forceSync().catch(() => undefined);
+            if (getSyncStatus().state === "idle") break;
+            if (attempt < BOOTSTRAP_SYNC_RETRIES) {
+              await new Promise((r) => setTimeout(r, BOOTSTRAP_SYNC_RETRY_DELAY_MS));
+            }
+          }
         }
         await ensureBootstrap();
       } catch (err) {
@@ -33,7 +47,22 @@ export function useBootstrap(): boolean {
 }
 
 export function useTeam(): Team | undefined {
-  return useLiveQuery(() => db.teams.toCollection().first(), []);
+  return useLiveQuery(async () => {
+    const teams = await db.teams.toArray();
+    if (teams.length <= 1) return teams[0];
+    // More than one team means a bootstrap race once created a duplicate
+    // (see useBootstrap above). Prefer whichever actually has a roster
+    // instead of an arbitrary/empty one; tie-break deterministically by id.
+    const players = await db.players.toArray();
+    const counts = new Map<string, number>();
+    for (const p of players) {
+      if (p.deletedAt) continue;
+      counts.set(p.teamId, (counts.get(p.teamId) ?? 0) + 1);
+    }
+    return [...teams].sort(
+      (a, b) => (counts.get(b.id) ?? 0) - (counts.get(a.id) ?? 0) || a.id.localeCompare(b.id),
+    )[0];
+  }, []);
 }
 
 export function useSeasons(): Season[] {
@@ -46,8 +75,21 @@ export function useSeasons(): Season[] {
   );
 }
 
+/** seasonId -> number of matches, for the default-season heuristic below. */
+function useSeasonMatchCounts(): Map<string, number> {
+  return (
+    useLiveQuery(async () => {
+      const matches = await db.matches.toArray();
+      const counts = new Map<string, number>();
+      for (const m of matches) counts.set(m.seasonId, (counts.get(m.seasonId) ?? 0) + 1);
+      return counts;
+    }, []) ?? new Map()
+  );
+}
+
 export function useActiveSeason(): Season | undefined {
-  const seasons = useSeasons();
+  const seasons = useSeasons(); // newest createdAt first
+  const matchCounts = useSeasonMatchCounts();
   const [storedId, setStoredId] = useState<string | null>(() => getStoredActiveSeasonId());
 
   useEffect(() => {
@@ -61,7 +103,18 @@ export function useActiveSeason(): Season | undefined {
   }, []);
 
   if (seasons.length === 0) return undefined;
-  return seasons.find((s) => s.id === storedId) ?? seasons[0];
+
+  const stored = seasons.find((s) => s.id === storedId);
+  if (stored) return stored;
+
+  // This device has never explicitly chosen a season (fresh browser/device,
+  // or its choice no longer exists). Rather than defaulting to whichever
+  // season happens to have the newest `createdAt` — which, if a bootstrap
+  // race ever created an empty duplicate (see useBootstrap), would be that
+  // empty one instead of the season people actually use — prefer a season
+  // that has matches in it.
+  const withMatches = seasons.filter((s) => (matchCounts.get(s.id) ?? 0) > 0);
+  return (withMatches.length > 0 ? withMatches : seasons)[0];
 }
 
 export function usePlayers(teamId: string | undefined, includeInactive = false): Player[] {

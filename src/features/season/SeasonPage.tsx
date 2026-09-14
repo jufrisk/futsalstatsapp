@@ -1,10 +1,7 @@
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useActiveSeason, usePlayers, useSeasons, useTeam } from "@/app/hooks";
 import { EmptyState, PageHeader, Spinner, StatBadge } from "@/components/ui";
-import { useToast } from "@/app/toast";
-import { useAdmin } from "@/app/adminAuth";
-import { createSeason, setActiveSeason } from "@/db/repositories";
+import { setActiveSeason } from "@/db/repositories";
 import { useSeasonStatistics } from "./useSeasonStats";
 
 export function SeasonPage() {
@@ -12,11 +9,8 @@ export function SeasonPage() {
   const seasons = useSeasons();
   const active = useActiveSeason();
   const players = usePlayers(team?.id, true);
-  const toast = useToast();
   const navigate = useNavigate();
-  const { ensureAdmin } = useAdmin();
   const { data, loading } = useSeasonStatistics(active?.id, players);
-  const [newName, setNewName] = useState("");
 
   if (!active) return <Spinner />;
 
@@ -26,9 +20,9 @@ export function SeasonPage() {
     <div>
       <PageHeader title={`Kausi ${active.name}`} subtitle="Koko kauden yhteenveto" />
 
-      <section className="card mb-4">
-        <div className="flex flex-wrap items-end gap-3">
-          <label className="flex flex-1 flex-col gap-1">
+      {seasons.length > 1 && (
+        <section className="card mb-4">
+          <label className="flex flex-col gap-1">
             <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
               Aktiivinen kausi
             </span>
@@ -44,37 +38,8 @@ export function SeasonPage() {
               ))}
             </select>
           </label>
-          <div className="flex items-end gap-2">
-            <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-                Uusi kausi
-              </span>
-              <input
-                className="input"
-                placeholder="2027–28"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-              />
-            </label>
-            <button
-              className="btn-secondary"
-              disabled={!newName.trim()}
-              onClick={async () => {
-                if (!(await ensureAdmin())) return;
-                try {
-                  await createSeason(newName.trim());
-                  setNewName("");
-                  toast.push("Kausi luotu", "success");
-                } catch (err) {
-                  toast.error(err);
-                }
-              }}
-            >
-              Luo
-            </button>
-          </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       <div className="mb-5 grid grid-cols-3 gap-2 sm:grid-cols-6">
         <StatBadge
